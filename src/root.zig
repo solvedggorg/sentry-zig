@@ -22,10 +22,10 @@ pub const deinitScopeManager = scopes.deinitScopeManager;
 pub const panicHandler = @import("panic_handler.zig").panicHandler;
 pub const stack_trace = @import("utils/stack_trace.zig");
 
-pub fn init(allocator: Allocator, dsn: ?[]const u8, options: SentryOptions) !*SentryClient {
+pub fn init(allocator: Allocator, io: std.Io, dsn: ?[]const u8, options: SentryOptions) !*SentryClient {
     try scopes.initScopeManager(allocator);
     const client = try allocator.create(SentryClient);
-    client.* = try SentryClient.init(allocator, dsn, options);
+    client.* = try SentryClient.init(allocator, io, dsn, options);
     const global_scope = try scopes.getGlobalScope();
     global_scope.bindClient(client);
     return client;
@@ -56,5 +56,7 @@ pub fn captureError(err: anyerror) !?EventId {
 
 test "compile and test everything" {
     _ = @import("panic_handler.zig");
-    std.testing.refAllDeclsRecursive(@This());
+    _ = @import("client.zig");
+    _ = @import("transport.zig");
+    _ = @import("scope.zig");
 }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const time_compat = @import("time_compat");
 const types = @import("types");
 
 const Event = types.Event;
@@ -42,7 +43,7 @@ pub fn createFullTestEvent(allocator: std.mem.Allocator) !Event {
         .type = BreadcrumbType.http,
         .level = Level.info,
         .category = try allocator.dupe(u8, "http"),
-        .timestamp = std.time.timestamp(),
+        .timestamp = time_compat.timestamp(),
         .data = breadcrumb_data,
     };
 
@@ -62,7 +63,7 @@ pub fn createFullTestEvent(allocator: std.mem.Allocator) !Event {
     return Event.init(
         allocator,
         EventId.new(),
-        @as(f64, @floatFromInt(std.time.timestamp())),
+        @as(f64, @floatFromInt(time_compat.timestamp())),
         "native", // Use default literal to avoid memory allocation
         Level.@"error",
         "test-logger",

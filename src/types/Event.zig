@@ -1,4 +1,5 @@
 const std = @import("std");
+const time_compat = @import("time_compat");
 const Random = std.Random;
 const Breadcrumb = @import("Breadcrumb.zig").Breadcrumb;
 const User = @import("User.zig").User;
@@ -27,7 +28,7 @@ pub const EventId = struct {
         if (event_id_prng == null) {
             // Combine multiple sources for better seed entropy
             var seed: u64 = 0;
-            seed ^= @as(u64, @intCast(std.time.nanoTimestamp()));
+            seed ^= @as(u64, @intCast(time_compat.nanoTimestamp()));
             seed ^= @as(u64, @intFromPtr(&event_id_counter));
             seed ^= std.Thread.getCurrentId();
             event_id_prng = Random.DefaultPrng.init(seed);
@@ -959,7 +960,7 @@ pub const Event = struct {
     pub fn fromMessage(message: []const u8, level: Level) Event {
         return Event{
             .event_id = EventId.new(),
-            .timestamp = @as(f64, @floatFromInt(std.time.timestamp())),
+            .timestamp = @as(f64, @floatFromInt(time_compat.timestamp())),
             .platform = "native",
             .level = level,
             .message = .{ .message = message },
@@ -989,7 +990,7 @@ pub const Event = struct {
 
         return Event{
             .event_id = EventId.new(),
-            .timestamp = @as(f64, @floatFromInt(std.time.timestamp())),
+            .timestamp = @as(f64, @floatFromInt(time_compat.timestamp())),
             .platform = "native",
             .level = Level.@"error",
             .exception = exception,

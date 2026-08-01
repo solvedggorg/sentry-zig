@@ -1,10 +1,9 @@
 const std = @import("std");
 const sentry = @import("sentry_zig");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.arena.allocator();
+    const io = init.io;
 
     // Initialize Sentry client with a test DSN
     // Replace with your actual Sentry DSN
@@ -18,7 +17,7 @@ pub fn main() !void {
         .send_default_pii = false,
     };
 
-    const client = sentry.init(allocator, dsn_string, options) catch |err| {
+    const client = sentry.init(allocator, io, dsn_string, options) catch |err| {
         std.log.err("Failed to initialize Sentry client: {any}", .{err});
         return;
     };
@@ -26,19 +25,18 @@ pub fn main() !void {
 
     std.log.info("Sentry captureMessage Demo", .{});
 
-    // Capture messages with different severity levels
     _ = try sentry.captureMessage("Debug: Application configuration loaded", .debug);
     _ = try sentry.captureMessage("Info: User authentication successful", .info);
     _ = try sentry.captureMessage("Warning: Database connection pool is running low", .warning);
     _ = try sentry.captureMessage("Error: Failed to process payment transaction", .@"error");
     _ = try sentry.captureMessage("Fatal: Critical system failure detected", .fatal);
 
-    // A dditional scenario examples
     _ = try sentry.captureMessage("Application startup completed", .info);
     _ = try sentry.captureMessage("Cache warmed up successfully", .debug);
     _ = try sentry.captureMessage("High memory usage detected: 85%", .warning);
     _ = try sentry.captureMessage("Database query timeout exceeded", .@"error");
 
     std.log.info("Messages sent to Sentry. Check your dashboard!", .{});
-    std.time.sleep(std.time.ns_per_s * 2);
+    var req: std.c.timespec = .{ .sec = 2, .nsec = 0 };
+    _ = std.c.nanosleep(&req, null);
 }

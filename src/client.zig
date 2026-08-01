@@ -1,4 +1,5 @@
 const std = @import("std");
+const time_compat = @import("time_compat");
 const Allocator = std.mem.Allocator;
 const Random = std.Random;
 const types = @import("types");
@@ -31,7 +32,7 @@ pub const SentryClient = struct {
     allocator: Allocator,
     transport: Transport,
 
-    pub fn init(allocator: Allocator, dsn: ?[]const u8, options: SentryOptions) !SentryClient {
+    pub fn init(allocator: Allocator, io: std.Io, dsn: ?[]const u8, options: SentryOptions) !SentryClient {
         var opts = options;
 
         // Take ownership of all data
@@ -79,7 +80,7 @@ pub const SentryClient = struct {
             .options = opts,
             .active = opts.dsn != null,
             .allocator = allocator,
-            .transport = Transport.init(allocator, &opts),
+            .transport = Transport.init(allocator, io, &opts),
         };
 
         return client;
@@ -127,7 +128,7 @@ pub const SentryClient = struct {
     pub fn captureError(self: *SentryClient, exception: Exception) !?[32]u8 {
         const event = Event{
             .event_id = EventId.new(),
-            .timestamp = @as(f64, @floatFromInt(std.time.timestamp())),
+            .timestamp = @as(f64, @floatFromInt(time_compat.timestamp())),
             .platform = "zig",
             .exception = exception,
         };
@@ -139,7 +140,7 @@ pub const SentryClient = struct {
     pub fn captureMessage(self: *SentryClient, message: []const u8) !?[32]u8 {
         const event = Event{
             .event_id = EventId.new(),
-            .timestamp = @as(f64, @floatFromInt(std.time.timestamp())),
+            .timestamp = @as(f64, @floatFromInt(time_compat.timestamp())),
             .platform = "zig",
             .message = .{ .message = message },
         };
@@ -182,7 +183,7 @@ pub const SentryClient = struct {
         _ = timeout;
         // TODO: Implement flush logic (delegate to transport layer)
         // For now, just sleep for a bit as dummy implementation
-        std.time.sleep(1_000_000_000); // 1 second
+        time_compat.sleep(1_000_000_000); // 1 second
     }
 
     pub fn close(self: *SentryClient, timeout: ?u64) void {
@@ -214,7 +215,7 @@ test "basic client initialization" {
         .send_default_pii = true,
     };
 
-    var client = try SentryClient.init(allocator, "https://key@sentry.io/1", options);
+    var client = try SentryClient.init(allocator, std.testing.io, "https://key@sentry.io/1", options);
     defer client.deinit();
 
     try std.testing.expect(client.isActive());
@@ -230,7 +231,7 @@ test "initialization with DSN string" {
         .send_default_pii = true,
     };
 
-    var client = try SentryClient.init(allocator, "https://key@sentry.io/1", options);
+    var client = try SentryClient.init(allocator, std.testing.io, "https://key@sentry.io/1", options);
     defer client.deinit();
 
     try std.testing.expect(client.isActive());
@@ -242,7 +243,7 @@ test "capture message" {
 
     const options = SentryOptions{};
 
-    var client = try SentryClient.init(allocator, "https://key@sentry.io/1", options);
+    var client = try SentryClient.init(allocator, std.testing.io, "https://key@sentry.io/1", options);
     defer client.deinit();
 
     const event_id = try client.captureMessage("Test message");
@@ -255,7 +256,7 @@ test "inactive client returns null" {
     // No DSN provided
     const options = SentryOptions{};
 
-    var client = try SentryClient.init(allocator, null, options);
+    var client = try SentryClient.init(allocator, std.testing.io, null, options);
     defer client.deinit();
 
     try std.testing.expect(!client.isActive());
@@ -269,7 +270,7 @@ test "capture exception" {
 
     const options = SentryOptions{};
 
-    var client = try SentryClient.init(allocator, "https://key@sentry.io/1", options);
+    var client = try SentryClient.init(allocator, std.testing.io, "https://key@sentry.io/1", options);
     defer client.deinit();
 
     const exception = Exception{

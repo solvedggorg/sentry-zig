@@ -1,6 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 const types = @import("types");
 const SentryOptions = types.SentryOptions;
@@ -8,15 +9,8 @@ const SentryEnvelope = types.SentryEnvelope;
 const TransportResult = types.TransportResult;
 const SentryEnvelopeItem = types.SentryEnvelopeItem;
 const SentryEnvelopeHeader = types.SentryEnvelopeHeader;
-const SentryEnvelopeItemHeader = types.SentryEnvelopeItemHeader;
 const EventId = types.EventId;
 const Event = types.Event;
-const User = types.User;
-const Breadcrumb = types.Breadcrumb;
-const Breadcrumbs = types.Breadcrumbs;
-const BreadcrumbType = types.BreadcrumbType;
-const Level = types.Level;
-const Message = types.Message;
 const test_utils = @import("utils/test_utils.zig");
 
 pub const HttpTransport = struct {
@@ -24,16 +18,15 @@ pub const HttpTransport = struct {
     options: SentryOptions,
     allocator: Allocator,
 
-    pub fn init(allocator: Allocator, options: *const SentryOptions) HttpTransport {
-        const transport = HttpTransport{
-            .client = std.http.Client{
+    pub fn init(allocator: Allocator, io: Io, options: *const SentryOptions) HttpTransport {
+        return HttpTransport{
+            .client = .{
                 .allocator = allocator,
+                .io = io,
             },
             .options = options.*,
             .allocator = allocator,
         };
-
-        return transport;
     }
 
     pub fn deinit(self: *HttpTransport) void {
@@ -44,12 +37,10 @@ pub const HttpTransport = struct {
         const payload = try self.envelopeToPayload(envelope);
         defer self.allocator.free(payload);
 
-        // Check if DSN is configured
         const dsn = self.options.dsn orelse {
             return TransportResult{ .response_code = 0 };
         };
 
-        // Construct the Sentry envelope endpoint URL
         const netloc = dsn.getNetloc(self.allocator) catch {
             return TransportResult{ .response_code = 0 };
         };
@@ -64,12 +55,6 @@ pub const HttpTransport = struct {
         };
         defer self.allocator.free(endpoint_url);
 
-        // Parse the URL and make the HTTP request
-        const uri = std.Uri.parse(endpoint_url) catch {
-            return TransportResult{ .response_code = 0 };
-        };
-
-        // Construct the auth header
         const auth_header = std.fmt.allocPrint(self.allocator, "Sentry sentry_version=7,sentry_key={s},sentry_client=sentry-zig/0.1.0", .{
             dsn.public_key,
         }) catch {
@@ -77,29 +62,20 @@ pub const HttpTransport = struct {
         };
         defer self.allocator.free(auth_header);
 
-        // Create Content-Length header value
-        const content_length = std.fmt.allocPrint(self.allocator, "{d}", .{payload.len}) catch {
-            return TransportResult{ .response_code = 0 };
-        };
-        defer self.allocator.free(content_length);
-
         const headers = [_]std.http.Header{
             .{ .name = "Content-Type", .value = "application/x-sentry-envelope" },
-            .{ .name = "Content-Length", .value = content_length },
             .{ .name = "X-Sentry-Auth", .value = auth_header },
         };
 
-        var response_body = std.ArrayList(u8).init(self.allocator);
-        defer response_body.deinit();
+        var response_aw: Io.Writer.Allocating = .init(self.allocator);
+        defer response_aw.deinit();
 
-        const result = self.client.fetch(std.http.Client.FetchOptions{
-            .location = std.http.Client.FetchOptions.Location{
-                .uri = uri,
-            },
+        const result = self.client.fetch(.{
+            .location = .{ .url = endpoint_url },
             .method = .POST,
             .extra_headers = &headers,
             .payload = payload,
-            .response_storage = .{ .dynamic = &response_body },
+            .response_writer = &response_aw.writer,
         }) catch {
             return TransportResult{ .response_code = 0 };
         };
@@ -110,38 +86,30 @@ pub const HttpTransport = struct {
     }
 
     pub fn envelopeToPayload(self: *HttpTransport, envelope: SentryEnvelope) ![]u8 {
-        var list = std.ArrayList(u8).init(self.allocator);
-        errdefer list.deinit();
+        var aw: Io.Writer.Allocating = .init(self.allocator);
+        errdefer aw.deinit();
 
-        try std.json.stringify(envelope.header, std.json.StringifyOptions{}, list.writer());
-        try list.append('\n');
+        try std.json.Stringify.value(envelope.header, .{}, &aw.writer);
+        try aw.writer.writeByte('\n');
 
         for (envelope.items, 0..) |item, i| {
-            try std.json.stringify(item.header, std.json.StringifyOptions{}, list.writer());
-            try list.append('\n');
-            // Add the actual item data
-            try list.appendSlice(item.data);
-            // Only add newline if not the last item
+            try std.json.Stringify.value(item.header, .{}, &aw.writer);
+            try aw.writer.writeByte('\n');
+            try aw.writer.writeAll(item.data);
             if (i < envelope.items.len - 1) {
-                try list.append('\n');
+                try aw.writer.writeByte('\n');
             }
         }
 
-        const result = try list.toOwnedSlice();
-        return result;
+        return try aw.toOwnedSlice();
     }
 
     pub fn envelopeFromEvent(self: *HttpTransport, event: Event) !SentryEnvelopeItem {
-        var list = std.ArrayList(u8).init(self.allocator);
-        errdefer list.deinit();
-
-        try std.json.stringify(event, .{}, list.writer());
-
-        const data = try list.toOwnedSlice();
+        const data = try std.json.Stringify.valueAlloc(self.allocator, event, .{});
         return SentryEnvelopeItem{
             .header = .{
                 .type = .event,
-                .length = @intCast(data.len), // Use actual data length, not buffer length
+                .length = @intCast(data.len),
             },
             .data = data,
         };
@@ -149,11 +117,10 @@ pub const HttpTransport = struct {
 };
 
 test "Envelope - Serialize empty envelope" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = testing.allocator;
+    const io = testing.io;
 
-    var transport = HttpTransport.init(allocator, &SentryOptions{});
+    var transport = HttpTransport.init(allocator, io, &SentryOptions{});
 
     const cstr: [*:0]const u8 = "24f9202c3c9f44deabef9ed3132b41e4";
     var event_id: [32]u8 = undefined;
@@ -168,15 +135,14 @@ test "Envelope - Serialize empty envelope" {
         .items = &[_]SentryEnvelopeItem{},
     });
     defer allocator.free(payload);
-    try std.testing.expectEqualStrings("{\"event_id\":\"24f9202c3c9f44deabef9ed3132b41e4\"}\n", payload);
+    try testing.expectEqualStrings("{\"event_id\":\"24f9202c3c9f44deabef9ed3132b41e4\"}\n", payload);
 }
 
 test "Envelope - Serialize event-id header" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = testing.allocator;
+    const io = testing.io;
 
-    var transport = HttpTransport.init(allocator, &SentryOptions{});
+    var transport = HttpTransport.init(allocator, io, &SentryOptions{});
 
     const cstr: [*:0]const u8 = "24f9202c3c9f44deabef9ed3132b41e4";
     var event_id: [32]u8 = undefined;
@@ -191,13 +157,12 @@ test "Envelope - Serialize event-id header" {
         .items = &[_]SentryEnvelopeItem{},
     });
     defer allocator.free(payload);
-    try std.testing.expectEqualStrings("{\"event_id\":\"24f9202c3c9f44deabef9ed3132b41e4\"}\n", payload);
+    try testing.expectEqualStrings("{\"event_id\":\"24f9202c3c9f44deabef9ed3132b41e4\"}\n", payload);
 }
 
 test "Envelope - Serialize envelope with empty event" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = testing.allocator;
+    const io = testing.io;
 
     const cstr: [*:0]const u8 = "24f9202c3c9f44deabef9ed3132b41e4";
     var event_id: [32]u8 = undefined;
@@ -213,7 +178,7 @@ test "Envelope - Serialize envelope with empty event" {
         },
     };
 
-    var transport = HttpTransport.init(allocator, &SentryOptions{});
+    var transport = HttpTransport.init(allocator, io, &SentryOptions{});
 
     const payload = try transport.envelopeToPayload(SentryEnvelope{
         .header = SentryEnvelopeHeader{
@@ -224,36 +189,32 @@ test "Envelope - Serialize envelope with empty event" {
         .items = item_buf[0..],
     });
     defer allocator.free(payload);
-    try std.testing.expectEqualStrings("{\"event_id\":\"24f9202c3c9f44deabef9ed3132b41e4\"}\n{\"type\":\"event\",\"length\":0}\n", payload);
+    try testing.expectEqualStrings("{\"event_id\":\"24f9202c3c9f44deabef9ed3132b41e4\"}\n{\"type\":\"event\",\"length\":0}\n", payload);
 }
 
 test "Envelope - Serialize full envelope item from event" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = testing.allocator;
+    const io = testing.io;
 
     var event = try test_utils.createFullTestEvent(allocator);
     defer event.deinit();
 
-    // Override dynamic fields with fixed values for predictable testing
     event.event_id = EventId{ .value = "24f9202c3c9f44deabef9ed3132b41e4".* };
-    event.timestamp = 1640995200.0; // Fixed timestamp: Jan 1, 2022
+    event.timestamp = 1640995200.0;
 
-    // Also fix breadcrumb timestamp for predictable testing
     if (event.breadcrumbs) |*breadcrumbs| {
         for (breadcrumbs.values) |*breadcrumb| {
-            breadcrumb.timestamp = 1640995200; // Fixed timestamp: Jan 1, 2022
+            breadcrumb.timestamp = 1640995200;
         }
     }
 
-    var transport = HttpTransport.init(allocator, &SentryOptions{});
+    var transport = HttpTransport.init(allocator, io, &SentryOptions{});
     const json_result = try transport.envelopeFromEvent(event);
     defer allocator.free(json_result.data);
     const json_string = json_result.data;
 
-    // Construct expected JSON string - based on actual output, null fields are omitted
     const expected_json =
-        \\{"event_id":"24f9202c3c9f44deabef9ed3132b41e4","timestamp":1.6409952e9,"platform":"native","level":"error","logger":"test-logger","transaction":"test-transaction","server_name":"test-server","release":"1.0.0","dist":"1","environment":"test","fingerprint":["custom","fingerprint"],"tags":{"environment":"test","version":"1.0.0"},"modules":{"mymodule":"1.0.0"},"message":{"message":"Test error message","formatted":"Test error message"},"breadcrumbs":{"values":[{"message":"HTTP Request","type":"http","level":"info","timestamp":1640995200,"category":"http","data":{"url":"/api/test","method":"GET"}}]},"user":{"id":"123","username":"testuser","email":"test@example.com","name":"Test User","ip_address":"192.168.1.1"}}
+        \\{"event_id":"24f9202c3c9f44deabef9ed3132b41e4","timestamp":1640995200,"platform":"native","level":"error","logger":"test-logger","transaction":"test-transaction","server_name":"test-server","release":"1.0.0","dist":"1","environment":"test","fingerprint":["custom","fingerprint"],"tags":{"environment":"test","version":"1.0.0"},"modules":{"mymodule":"1.0.0"},"message":{"message":"Test error message","formatted":"Test error message"},"breadcrumbs":{"values":[{"message":"HTTP Request","type":"http","level":"info","timestamp":1640995200,"category":"http","data":{"url":"/api/test","method":"GET"}}]},"user":{"id":"123","username":"testuser","email":"test@example.com","name":"Test User","ip_address":"192.168.1.1"}}
     ;
 
     try testing.expectEqualStrings(expected_json, json_string);

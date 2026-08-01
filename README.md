@@ -1,7 +1,7 @@
 # Experimental Sentry for Zig
 
 [![Build Status](https://img.shields.io/badge/build-passing-green)](https://github.com/getsentry/sentry-zig)
-[![Zig Version](https://img.shields.io/badge/zig-0.14.1+-blue)](https://ziglang.org)
+[![Zig Version](https://img.shields.io/badge/zig-0.16.0+-blue)](https://ziglang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 Welcome to the experimental **Zig SDK** for [**Sentry**](https://sentry.io).
@@ -14,7 +14,7 @@ Welcome to the experimental **Zig SDK** for [**Sentry**](https://sentry.io).
 
 You need:
 - A [Sentry account and project](https://sentry.io/signup/)
-- Zig 0.14.1 or later
+- Zig 0.16.0 or later
 
 ### Installation
 
@@ -24,7 +24,7 @@ Add sentry-zig to your project using the Zig package manager:
 
 ```bash
 # Add the dependency (replace with actual URL when published)
-zig fetch --save https://github.com/getsentry/sentry-zig/archive/refs/heads/main.tar.gz
+zig fetch --save https://github.com/solvedggorg/sentry-zig/archive/refs/tags/v0.1.0.tar.gz
 ```
 
 Then in your `build.zig`, add the sentry-zig dependency:
@@ -80,7 +80,7 @@ pub fn main() !void {
         .send_default_pii = false,
     };
 
-    var client = sentry.init(allocator, dsn, options) catch |err| {
+    var client = sentry.init(allocator, io, dsn, options) catch |err| {
         std.log.err("Failed to initialize Sentry: {}", .{err});
         return;
     };

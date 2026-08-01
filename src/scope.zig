@@ -1,4 +1,5 @@
 const std = @import("std");
+const time_compat = @import("time_compat");
 const types = @import("types");
 
 // Top-level type aliases
@@ -9,11 +10,11 @@ const Level = types.Level;
 const Event = types.Event;
 const EventId = @import("types").EventId;
 const Contexts = types.Contexts;
-const ArrayList = std.ArrayList;
+const ArrayList = std.array_list.Managed;
 const HashMap = std.HashMap;
 const Allocator = std.mem.Allocator;
-const Mutex = std.Thread.Mutex;
-const RwLock = std.Thread.RwLock;
+const Mutex = std.Io.Mutex;
+const RwLock = std.Io.RwLock;
 const testing = std.testing;
 const SentryClient = @import("client.zig").SentryClient;
 
@@ -441,7 +442,7 @@ pub const Scope = struct {
 };
 
 var global_scope: ?*Scope = null;
-var global_scope_mutex = Mutex{};
+var global_scope_mutex: Mutex = .init;
 
 threadlocal var thread_isolation_scope: ?*Scope = null;
 threadlocal var thread_current_scope_stack: ?*ArrayList(*Scope) = null;
@@ -460,8 +461,8 @@ const ScopeManager = struct {
     }
 
     fn getGlobalScope(self: *ScopeManager) !*Scope {
-        global_scope_mutex.lock();
-        defer global_scope_mutex.unlock();
+        global_scope_mutex.lockUncancelable(std.Options.debug_io);
+        defer global_scope_mutex.unlock(std.Options.debug_io);
 
         if (global_scope == null) {
             const scope = try self.allocator.create(Scope);
@@ -547,8 +548,8 @@ pub fn initScopeManager(allocator: Allocator) !void {
 pub fn deinitScopeManager() void {
     if (g_scope_manager) |*manager| {
         // Clean up global scope
-        global_scope_mutex.lock();
-        defer global_scope_mutex.unlock();
+        global_scope_mutex.lockUncancelable(std.Options.debug_io);
+        defer global_scope_mutex.unlock(std.Options.debug_io);
 
         if (global_scope) |scope| {
             scope.deinit();
@@ -673,8 +674,8 @@ pub fn captureEvent(event: Event) !?EventId {
 }
 
 fn resetAllScopeState(allocator: std.mem.Allocator) void {
-    global_scope_mutex.lock();
-    defer global_scope_mutex.unlock();
+    global_scope_mutex.lockUncancelable(std.Options.debug_io);
+    defer global_scope_mutex.unlock(std.Options.debug_io);
 
     if (global_scope) |scope| {
         scope.deinit();
@@ -702,7 +703,7 @@ fn resetAllScopeState(allocator: std.mem.Allocator) void {
 }
 
 test "Scope - comprehensive API testing" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -750,7 +751,7 @@ test "Scope - comprehensive API testing" {
         .type = BreadcrumbType.user,
         .level = Level.info,
         .category = "ui",
-        .timestamp = std.time.timestamp(),
+        .timestamp = time_compat.timestamp(),
         .data = null,
     });
     try addBreadcrumb(Breadcrumb{
@@ -758,7 +759,7 @@ test "Scope - comprehensive API testing" {
         .type = BreadcrumbType.http,
         .level = Level.debug,
         .category = "api",
-        .timestamp = std.time.timestamp(),
+        .timestamp = time_compat.timestamp(),
         .data = null,
     });
     try testing.expect(isolation_scope.breadcrumbs.items.len == 2);
@@ -778,7 +779,7 @@ test "Scope - comprehensive API testing" {
 }
 
 test "Scope - breadcrumb limit enforcement" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -795,7 +796,7 @@ test "Scope - breadcrumb limit enforcement" {
             .type = BreadcrumbType.default,
             .level = Level.info,
             .category = null,
-            .timestamp = std.time.timestamp(),
+            .timestamp = time_compat.timestamp(),
             .data = null,
         };
         try test_scope.addBreadcrumb(breadcrumb);
@@ -806,7 +807,7 @@ test "Scope - breadcrumb limit enforcement" {
 }
 
 test "Scope - complex fork with all data types" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -836,7 +837,7 @@ test "Scope - complex fork with all data types" {
         .type = BreadcrumbType.navigation,
         .level = Level.info,
         .category = "test",
-        .timestamp = std.time.timestamp(),
+        .timestamp = time_compat.timestamp(),
         .data = data,
     };
     try original.addBreadcrumb(breadcrumb);
@@ -958,7 +959,7 @@ const ThreadTestContext = struct {
 };
 
 test "Scope - thread safety verification" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -989,7 +990,7 @@ test "Scope - thread safety verification" {
 }
 
 test "Scope - withScope workflow and restoration" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
