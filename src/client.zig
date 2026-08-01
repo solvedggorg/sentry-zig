@@ -22,7 +22,7 @@ const SDK = types.SDK;
 var SDK_INFO = [_]SDKPackage{
     SDKPackage{
         .name = "sentry-zig",
-        .version = "0.1.0",
+        .version = "0.1.1",
     },
 };
 
@@ -156,7 +156,7 @@ pub const SentryClient = struct {
         if (prepared.sdk == null) {
             prepared.sdk = SDK{
                 .name = "sentry.zig",
-                .version = "0.1.0", //TODO: get version from somewhere instead of hardcoding it
+                .version = "0.1.1", //TODO: get version from somewhere instead of hardcoding it
                 .packages = SDK_INFO[0..],
             };
         }

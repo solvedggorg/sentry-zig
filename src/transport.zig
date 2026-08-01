@@ -55,7 +55,7 @@ pub const HttpTransport = struct {
         };
         defer self.allocator.free(endpoint_url);
 
-        const auth_header = std.fmt.allocPrint(self.allocator, "Sentry sentry_version=7,sentry_key={s},sentry_client=sentry-zig/0.1.0", .{
+        const auth_header = std.fmt.allocPrint(self.allocator, "Sentry sentry_version=7,sentry_key={s},sentry_client=sentry-zig/0.1.1", .{
             dsn.public_key,
         }) catch {
             return TransportResult{ .response_code = 0 };

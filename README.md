@@ -24,7 +24,7 @@ Add sentry-zig to your project using the Zig package manager:
 
 ```bash
 # Add the dependency (replace with actual URL when published)
-zig fetch --save https://github.com/solvedggorg/sentry-zig/archive/refs/tags/v0.1.0.tar.gz
+zig fetch --save https://github.com/solvedggorg/sentry-zig/archive/refs/tags/v0.1.1.tar.gz
 ```
 
 Then in your `build.zig`, add the sentry-zig dependency:
